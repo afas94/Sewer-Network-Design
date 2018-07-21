@@ -1,0 +1,326 @@
+model Trazado
+uses "mmxprs"; !gain access to the Xpress-Optimizer solver
+uses "mmsystem","mmive", "mmjobs";
+
+!parameters 
+parameters
+	!inputFile = "datos2x2.txt"
+	!inputFile = "Datos de Entrada/InputData.txt"
+	inputFile = "Datos_de_Entrada/InputData.txt"
+	outputFile = "Resultados.txt"
+end-parameters
+
+
+
+
+
+forward function getProblemStatus(status:integer):string
+forward procedure graficar
+
+!declarations
+declarations
+	!SET
+	N: set of integer	!Set of nodes
+	K: set of string	!Set of types of arcs
+	Termino1: string
+	Termino2: string
+	S: set of integer   !set of segments
+	!Parameters
+	
+	c: dynamic array(N,N) of real	!Cost of existing arcs
+	
+		cI: dynamic array (N,N,K) of real	!pseudo-cost of inicial pipes
+		
+	  
+	b: array(N) of real					!Demand/offer of each node
+	
+	posX: array(N) of real 				!coor x of node i \in N
+	
+	posY: array(N) of real	 			!coor y of node i \in N
+	
+	e: array(N) of real					!Elevation of each node
+	
+	intercept: array(N,N) of real			!intercept of the F.O. for each arc
+	
+		interceptI: dynamic array (N,N,K) of real	!Intercept point for the F.O
+	
+	
+	lg:dynamic array(N,N) of real
+	l:array(S)of real
+	u:array(S)of real
+	
+	p:dynamic array (N,N) of real
+	h:dynamic array (N,N) of real
+	
+	al: dynamic array (N,N) of real
+	bt: dynamic array (N,N) of real
+	
+	!Decision variables
+	x: dynamic array(N,N,K) of mpvar	!Binary variable: 1, if arc (i,j) is used with the k type
+	
+	y: dynamic array(N,N,K) of mpvar		!Flow in the arc (i,j) with the k type
+	
+	lam: dynamic array(N,N,S)of mpvar 
+	w: dynamic array (N,N,K) of mpvar
+	
+	z:dynamic array (N,N) of mpvar
+	
+	FO: linctr							!Objective Function
+	
+	time1: real							!Execution time
+
+end-declarations
+
+S:=1..5
+
+
+initializations from inputFile
+	K c b posX posY e intercept al bt lg h
+end-initializations
+
+
+writeln(c)
+writeln(intercept)
+
+!Variables creation
+forall (i in N, j in N, k in K|exists(c(i,j)))do	!Creates binary variable x: 1, if arc (i,j) is used with the k type
+	create(x(i,j,k))
+	x(i,j,k)is_binary
+end-do
+
+forall (i in N, j in N, k in K|exists(c(i,j)))do	!Creates variable y - Flow in the arc (i,j) with the k type
+	create(y(i,j,k))
+end-do
+
+
+forall (i in N, j in N|exists(c(i,j)))do	!Creates variable y - Flow in the arc (i,j) with the k type
+	create(z(i,j))
+end-do
+
+forall (i in N, j in N, s in S|exists(c(i,j)))do	!Creates variable  in the arc (i,j) with the k type
+	create(lam(i,j,s))
+	lam(i,j,s)is_binary
+end-do
+
+
+forall (i in N, j in N, k in K|exists(c(i,j)))do	!Creates variable y - Flow in the arc (i,j) with the k type
+	create(w(i,j,k))
+end-do
+
+
+forall (i in N, j in N, k in K|exists(h(i,j)))do	!Assignes different costs for inicial and continuos arcs
+		cI(i,j,k):=c(i,j)
+		interceptI(i,j,k):=intercept(i,j)
+end-do
+
+M:=10000
+
+
+!forall(i in N, j in N|exists(c(i,j)))do
+!h(i,j):=3.1
+!lg(i,j):=90
+!p(i,j):=0.0001
+!end-do
+
+
+
+!writeln(getsize(N)-1,", ", getsize(N),":",c(getsize(N)-1,getsize(N)))
+	
+
+!Constraints
+forall (i in N) do
+	sum (j in N,k in K)y(i,j,k)-sum(j in N, k in K)y(j,i,k)=b(i) !Balance equation
+end-do
+
+forall (i in N, j in N|exists(c(i,j)))	!One arc per section
+	sum (k in K)x(i,j,k)+sum(k in K)x(j,i,k)= 1
+
+forall (i in N)				!Permits maximum one continuos arc (i,j) comming from de node i 
+	sum(j in N)x(i,j,"C")<= 1
+	
+forall (i in N, j in N, k in K) !Lower bound of y
+	x(i,j,k)*b(i)/4<=y(i,j,k)
+
+forall (i in N, j in N, k in K)!Upper bound of y
+	y(i,j,k)<=x(i,j,k)*M
+
+forall(i in N) do			!limits the flow on inicial pipes
+	if (i<getsize(N))then
+		sum (j in N)y(i,j,"I")<=b(i)
+	end-if
+end-do
+
+
+
+
+forall (i in N)	do				!allows just the posible conexions between arcs I and C
+	if(i<getsize(N))then
+		sum(j in N, k in K) x(j,i,k)<=M*sum(j in N)x(i,j,"C")
+		sum(j in N, k in K) x(j,i,k)>=sum(j in N)x(i,j,"C")
+	end-if 
+end-do
+
+x(getsize(N)-1,getsize(N),"C")=1 !The arc linked to the outfall is always a Continous arc in direction to the outfall
+
+y(getsize(N)-1,getsize(N),"C")>= sum(i in 1..getsize(N)-1)b(i)!The arc linked to the outfall has a flow equals to the total inflows
+
+!Objective Function
+
+
+forall(s in S)do
+dq:=-b(getsize(N))/getsize(S)
+
+l(s):=(s-1)*dq
+u(s):=s*dq
+
+end-do
+
+
+f1:=0.0
+
+forall(s in S,i in N, j in N|exists (h(i,j))) do 
+	
+	dup:=(u(s)/al(i,j))^(1/bt(i,j))
+	ddown:=(l(s)/al(i,j))^(1/bt(i,j))
+	volup:= (h(i,j)+dup+0.4)*(0.4+dup)*lg(i,j)
+	voldown:= (h(i,j)+ddown+0.4)*(0.4+ddown)*lg(i,j)
+	
+	f1m:= 1.32*(9579.31*dup^0.5737*lg(i,j)+1163.77*volup^1.31)
+	f2m:=1.32*(9579.31*ddown^0.5737*lg(i,j)+1163.77*voldown^1.31)
+	
+
+	m(i,j,s):=(f2m-f1m)/(u(s)-l(s))
+	it(i,j,s):=f2m-m(i,j,s)*u(s)
+	
+end-do
+
+forall(i in N, j in N, s in S, k in K|exists(h(i,j)))
+z(i,j)>= m(i,j,s)*y(i,j,k)+x(i,j,k)*it(i,j,s)
+
+
+
+
+forall(i in N, j in N| exists(h(i,j)))
+sum(s in S) lam(i,j,s)=1
+
+forall(i in N, j in N,s in S| exists(h(i,j)))do
+l(s)*lam(i,j,s)<=sum (k in K)y(i,j,k)
+u(s)+(1-lam(i,j,s))*20>=sum (k in K)y(i,j,k)
+end-do
+
+
+FO := sum(i in N, j in N, k in K) cI(i,j,k)*y(i,j,k) + sum(i in N, j in N, k in K)interceptI(i,j,k)*x(i,j,k)
+FO1:= sum(i in N, j in N) z(i,j)
+minimize(FO1)
+
+
+!writeln("Objective function; ", getobjval)
+
+
+
+
+!forall (i in N,j in N, k in K|getsol(x(i,j,k))>0.5) do
+	!writeln("flujo arco: (",i,", ",j,") " ,getsol(y(i,j,k)))
+!end-do 
+
+a:=getsize(c)/2
+
+fopen(outputFile, F_OUTPUT)
+writeln("Manholes ",getsize(N))
+	forall(i in 1..(getsize(N))) do 
+		writeln(i," ",posX(i)," ",posY(i)," ", e(i))
+	end-do
+writeln("Sections ",a)
+	forall (i in N,j in N, k in K|getsol(x(i,j,k))>0.5) do
+		writeln(i," ",j," ",k," ",getsol(y(i,j,k)))
+	end-do 
+fclose(F_OUTPUT)
+
+writeln("Manholes ",getsize(N))
+	forall(i in 1..(getsize(N))) do 
+		writeln(i," ",posX(i)," ",posY(i)," ", e(i))
+	end-do
+writeln("Sections ",a)
+	forall (i in N,j in N, k in K|getsol(x(i,j,k))>0.5) do
+		writeln(i," ",j," ",k," ",getsol(y(i,j,k)), " ", (cI(i,j,k)+interceptI(i,j,k)))
+	end-do 
+	
+	
+	
+!Determines the status of the problem
+function getProblemStatus(status:integer):string
+	case status of
+		XPRS_OPT: returned := "Solved to optimality."
+		XPRS_UNF: returned := "Unfinished."
+		XPRS_INF: returned := "Infeasible."
+		XPRS_UNB: returned := "Unbounded."
+			else returned:= "Unknown status."
+	end-case
+end-function
+
+writeln(getProblemStatus(getprobstat))
+writeln("\nObjective function: ", getobjval)
+
+graficar
+
+!Graphics the solution
+procedure graficar
+		
+		IVEerase	!Deletes previous graphics 
+		
+		!Figure dimensions
+		IVEzoom(min(i in N)posX(i)-10,min(i in N)posY(i)-10,max(i in N)posX(i)+10,max(i in N)posY(i)+10)
+		
+		
+		node:=IVEaddplot("Nodes",IVE_CYAN)	!Nodes' color
+		outfall:=IVEaddplot("Outfall",IVE_BLACK)	!Outfall's color
+		
+		arcsI:=IVEaddplot("Inicial Pipes",IVE_MAGENTA)	!Initial pipes color
+		arcsC:=IVEaddplot("Continuos Pipes",IVE_BLUE)	!Continuos pipes color
+		
+		
+		radio:=5	!Defines the node's radio
+		
+		!Paints the arcs
+		forall(i in N,j in N, k in K|round(getsol(x(i,j,k)))=1)do
+		    
+		    !!for lines rather than arrows 
+			!IVEdrawline(arcoscamion,posX(i),posY(i),posX(j),posY(j)) 
+			
+			!!for arrows rather than lines
+			if (k="I")then
+				if (posX(i)<posX(j))then
+				IVEdrawarrow(arcsI,posX(i)+20,posY(i),posX(j),posY(j))
+				elif (posX(i)>posX(j))then
+				IVEdrawarrow(arcsI,posX(i)-20,posY(i),posX(j),posY(j))
+				elif (posY(i)<posY(j))then
+				IVEdrawarrow(arcsI,posX(i),posY(i)+20,posX(j),posY(j))	
+				elif (posY(i)>posY(j))then
+				IVEdrawarrow(arcsI,posX(i),posY(i)-20,posX(j),posY(j))
+				end-if
+			else			
+				IVEdrawarrow(arcsC,posX(i),posY(i),posX(j),posY(j))
+			end-if
+		end-do
+		
+		!Paints the nodes, except the outfall
+		forall(i in N|i<>getsize(N)) do 
+			!circles
+			IVEdrawellipse(node,posX(i)-radio,posY(i)-radio,posX(i)+radio,posY(i)+radio)
+			!Node ID
+			IVEdrawlabel(node,posX(i)+2,posY(i)+0.3,""+i+"")
+		end-do
+		
+		!Paints the outfall (last node)
+		IVEdrawellipse(outfall,posX(getsize(N))-radio,posY(getsize(N))-radio,posX(getsize(N))+radio,posY(getsize(N))+radio)
+		IVEdrawlabel(outfall,posX(getsize(N))+2,posY(getsize(N))+0.3,""+getsize(N)+"")
+		
+end-procedure
+
+!Computational time
+time1:=gettime
+FO
+writeln("\nTiempo total de ejecución: ",gettime-time1/10000)
+
+write(dq)
+end-model
