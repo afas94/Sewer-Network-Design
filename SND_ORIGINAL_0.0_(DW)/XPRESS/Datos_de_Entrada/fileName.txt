@@ -1,1 +1,0 @@
-inputFile: "Datos_de_Entrada/InputData.txt"
